@@ -1,10 +1,16 @@
 package client
 
 import (
+	"encoding/json"
+	"io/ioutil"
+
 	"github.com/spf13/pflag"
 	rpchttp "github.com/tendermint/tendermint/rpc/client/http"
 
 	"github.com/cosmos/cosmos-sdk/client/flags"
+	"github.com/cosmos/cosmos-sdk/crypto/hd"
+	"github.com/cosmos/cosmos-sdk/crypto/keyring"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	"github.com/cosmos/cosmos-sdk/types/query"
 )
@@ -77,4 +83,56 @@ func ReadPageRequest(flagSet *pflag.FlagSet) (*query.PageRequest, error) {
 // https://github.com/cosmos/cosmos-sdk/issues/8986
 func NewClientFromNode(nodeURI string) (*rpchttp.HTTP, error) {
 	return rpchttp.New(nodeURI, "/websocket")
+}
+
+// ----------------------------------0000000000000--------------------------------------------------
+// SHARERING MODIFICATION
+
+func GetKeySeedFromFile(seedPath string) (string, error) {
+	seeds, err := ioutil.ReadFile(seedPath)
+	if err != nil {
+		return "", err
+	}
+	var a map[string]string
+	if err := json.Unmarshal(seeds, &a); err != nil {
+		return "", err
+	}
+	return a["secret"], nil
+}
+
+func GetAddressFromFile(filepath string) ([]string, error) {
+	data, err := ioutil.ReadFile(filepath)
+	if err != nil {
+		return nil, err
+	}
+	var addrList []string
+	json.Unmarshal(data, &addrList)
+	return addrList, nil
+}
+
+func CreateContextWithKeyBase(seed string, clientCtx Context) (Context, error) {
+	kb := keyring.NewInMemory()
+	keyName := "elon_musk_deer"
+	info, err := kb.NewAccount(keyName, seed, "", sdk.GetConfig().Seal().GetFullBIP44Path(), hd.Secp256k1)
+	if err != nil {
+		return Context{}, err
+	}
+
+	clientCtx = clientCtx.WithFrom(keyName).WithFromName(info.GetName()).WithFromAddress(info.GetAddress()).WithKeyring(kb)
+
+	return clientCtx, nil
+}
+
+func CreateContextFromSeed(seedFile string, clientCtx Context) (Context, error) {
+	seed, err := GetKeySeedFromFile(seedFile)
+	if err != nil {
+		return Context{}, err
+	}
+
+	clientCtx, err = CreateContextWithKeyBase(seed, clientCtx)
+	if err != nil {
+		return Context{}, err
+	}
+
+	return clientCtx, nil
 }
