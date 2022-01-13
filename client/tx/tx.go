@@ -23,6 +23,25 @@ import (
 	authsigning "github.com/cosmos/cosmos-sdk/x/auth/signing"
 )
 
+type AutoLoadFeeStatus struct {
+	MsgLoadFee sdk.Msg
+	TotalFees  sdk.Coins
+}
+
+type AutoLoadFee func(clientCtx client.Context, msgs []sdk.Msg) (AutoLoadFeeStatus, error)
+
+var autoLoadFeeFunc func(clientCtx client.Context, msgs []sdk.Msg) (AutoLoadFeeStatus, error)
+
+// SetAutoLoadFee inject tx factory for auto check fee when user not put flag fee
+// The function need to return sdk.Msg which loads fee if current signer need to buy more fee
+func SetAutoLoadFee(f AutoLoadFee) error {
+	if autoLoadFeeFunc != nil {
+		return errors.New("auto load fee func already assigned")
+	}
+	autoLoadFeeFunc = f
+	return nil
+}
+
 // GenerateOrBroadcastTxCLI will either generate and print and unsigned transaction
 // or sign it and broadcast it returning an error upon failure.
 func GenerateOrBroadcastTxCLI(clientCtx client.Context, flagSet *pflag.FlagSet, msgs ...sdk.Msg) error {
@@ -40,6 +59,16 @@ func GenerateOrBroadcastTxWithFactory(clientCtx client.Context, txf Factory, msg
 	for _, msg := range msgs {
 		if err := msg.ValidateBasic(); err != nil {
 			return err
+		}
+	}
+	if autoLoadFeeFunc != nil && txf.fees.IsZero() {
+		status, err := autoLoadFeeFunc(clientCtx, msgs)
+		if err != nil {
+			return err
+		}
+		txf.fees = status.TotalFees
+		if status.MsgLoadFee != nil {
+			msgs = append([]sdk.Msg{status.MsgLoadFee}, msgs...)
 		}
 	}
 
