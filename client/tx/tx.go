@@ -23,23 +23,16 @@ import (
 	authsigning "github.com/cosmos/cosmos-sdk/x/auth/signing"
 )
 
-type AutoLoadFeeStatus struct {
-	MsgLoadFee sdk.Msg
-	TotalFees  sdk.Coins
-}
+// PreRunBroadcastTx func type that will be exected before BroadcastTx
+// return new state of the clientCtx, txf and msgs.
+// if the func return error, the function will not process to BroadcastTx but return error
+type PreRunBroadcastTx func(clientCtx client.Context, txf Factory, msgs ...sdk.Msg) (nClientCtx client.Context, nTxf Factory, nMsgs []sdk.Msg, err error)
 
-type AutoLoadFee func(clientCtx client.Context, msgs []sdk.Msg) (AutoLoadFeeStatus, error)
+// preRunBroadcastTxs the list of func prerun will be exected before BroadcastTx
+var preRunBroadcastTxs []PreRunBroadcastTx
 
-var autoLoadFeeFunc func(clientCtx client.Context, msgs []sdk.Msg) (AutoLoadFeeStatus, error)
-
-// SetAutoLoadFee inject tx factory for auto check fee when user not put flag fee
-// The function need to return sdk.Msg which loads fee if current signer need to buy more fee
-func SetAutoLoadFee(f AutoLoadFee) error {
-	if autoLoadFeeFunc != nil {
-		return errors.New("auto load fee func already assigned")
-	}
-	autoLoadFeeFunc = f
-	return nil
+func AddPreRunBroadcastTx(f PreRunBroadcastTx) {
+	preRunBroadcastTxs = append(preRunBroadcastTxs, f)
 }
 
 // GenerateOrBroadcastTxCLI will either generate and print and unsigned transaction
@@ -56,19 +49,19 @@ func GenerateOrBroadcastTxWithFactory(clientCtx client.Context, txf Factory, msg
 	// We were calling ValidateBasic separately in each CLI handler before.
 	// Right now, we're factorizing that call inside this function.
 	// ref: https://github.com/cosmos/cosmos-sdk/pull/9236#discussion_r623803504
+
 	for _, msg := range msgs {
 		if err := msg.ValidateBasic(); err != nil {
 			return err
 		}
 	}
-	if autoLoadFeeFunc != nil && txf.fees.IsZero() {
-		status, err := autoLoadFeeFunc(clientCtx, msgs)
+
+	// Check if there is any pre run funcs that need to be executed before broadcast
+	var err error
+	for i, f := range preRunBroadcastTxs {
+		clientCtx, txf, msgs, err = f(clientCtx, txf, msgs...)
 		if err != nil {
-			return err
-		}
-		txf.fees = status.TotalFees
-		if status.MsgLoadFee != nil {
-			msgs = append([]sdk.Msg{status.MsgLoadFee}, msgs...)
+			return sdkerrors.Wrapf(err, "pre run function at %v", i)
 		}
 	}
 
