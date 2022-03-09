@@ -24,6 +24,18 @@ import (
 	authsigning "github.com/cosmos/cosmos-sdk/x/auth/signing"
 )
 
+// PreRunBroadcastTx func type that will be exected before BroadcastTx
+// return new state of the clientCtx, txf and msgs.
+// if the func return error, the function will not process to BroadcastTx but return error
+type PreRunBroadcastTx func(clientCtx client.Context, txf Factory, msgs ...sdk.Msg) (nClientCtx client.Context, nTxf Factory, nMsgs []sdk.Msg, err error)
+
+// preRunBroadcastTxs the list of func prerun will be exected before BroadcastTx
+var preRunBroadcastTxs []PreRunBroadcastTx
+
+func AddPreRunBroadcastTx(f PreRunBroadcastTx) {
+	preRunBroadcastTxs = append(preRunBroadcastTxs, f)
+}
+
 // GenerateOrBroadcastTxCLI will either generate and print and unsigned transaction
 // or sign it and broadcast it returning an error upon failure.
 func GenerateOrBroadcastTxCLI(clientCtx client.Context, flagSet *pflag.FlagSet, msgs ...sdk.Msg) error {
@@ -38,9 +50,19 @@ func GenerateOrBroadcastTxWithFactory(clientCtx client.Context, txf Factory, msg
 	// We were calling ValidateBasic separately in each CLI handler before.
 	// Right now, we're factorizing that call inside this function.
 	// ref: https://github.com/cosmos/cosmos-sdk/pull/9236#discussion_r623803504
+
 	for _, msg := range msgs {
 		if err := msg.ValidateBasic(); err != nil {
 			return err
+		}
+	}
+
+	// Check if there is any pre run funcs that need to be executed before broadcast
+	var err error
+	for i, f := range preRunBroadcastTxs {
+		clientCtx, txf, msgs, err = f(clientCtx, txf, msgs...)
+		if err != nil {
+			return sdkerrors.Wrapf(err, "pre run function at %v", i)
 		}
 	}
 

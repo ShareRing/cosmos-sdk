@@ -76,6 +76,9 @@ const (
 	// Tendermint logging flags
 	FlagLogLevel  = "log_level"
 	FlagLogFormat = "log_format"
+
+	// ShareRing custom flag
+	FlagKeySeed = "key-seed"
 )
 
 // LineBreak can be included in a command list to provide a blank line
@@ -116,6 +119,9 @@ func AddTxFlagsToCmd(cmd *cobra.Command) {
 
 	// --gas can accept integers and "auto"
 	cmd.Flags().String(FlagGas, "", fmt.Sprintf("gas limit to set per-transaction; set to %q to calculate sufficient gas automatically (default %d)", GasFlagAuto, DefaultGasLimit))
+
+	// add ShareRing custom flags
+	cmd.Flags().String(FlagKeySeed, "", "path to key_seed.json")
 
 	cmd.MarkFlagRequired(FlagChainID)
 }
