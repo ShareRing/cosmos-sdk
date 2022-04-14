@@ -4,11 +4,15 @@ order: 2
 
 # REST Endpoints Migration
 
-Migrate your REST endpoints. Legacy REST endpoints have been deprecated since v0.40 and they will be removed in v0.44. {synopsis}
+Migrate to gRPC-Gateway REST endpoints. Legacy REST endpoints were marked as deprecated in v0.40 and will be removed in v0.45. {synopsis}
+
+::: warning
+Two Legacy REST endpoints (`POST /txs` and `POST /txs/encode`) were removed ahead of schedule in v0.44 due to a security vulnerability.
+:::
 
 ## Deprecation of Legacy REST Endpoints
 
-The Cosmos SDK versions v0.39 and earlier provided REST endpoints to query the state and broadcast transactions. These endpoints were kept in Cosmos SDK v0.40 and they are still available in v0.43, but they are marked as deprecated and will be removed in v0.44. We therefore call these endpoints legacy REST endpoints.
+Cosmos SDK versions v0.39 and earlier registered REST endpoints using a package called `gorilla/mux`. These REST endpoints were marked as deprecated in v0.40 and have since been referred to as legacy REST endpoints. Legacy REST endpoints will be officially removed in v0.45.
 
 Some important information concerning all legacy REST endpoints:
 
@@ -98,4 +102,4 @@ Previously, some modules exposed legacy `POST` endpoints to generate unsigned tr
 
 ## Migrating to gRPC
 
-Instead of hitting REST endpoints as described in the previous paragraph, the SDK also exposes a gRPC server. Any client can use gRPC instead of REST to interact with the node. An overview of different ways to communicate with a node can be found [here](../core/grpc_rest.md), and a concrete tutorial for setting up a gRPC client [here](../run-node/txs.md#programmatically-with-go).
+Instead of hitting REST endpoints as described above, the Cosmos SDK also exposes a gRPC server. Any client can use gRPC instead of REST to interact with the node. An overview of different ways to communicate with a node can be found [here](../core/grpc_rest.md), and a concrete tutorial for setting up a gRPC client can be found [here](../run-node/txs.md#programmatically-with-go).

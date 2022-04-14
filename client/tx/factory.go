@@ -11,6 +11,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
+	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/tx/signing"
 )
@@ -44,6 +45,8 @@ func NewFactoryCLI(clientCtx client.Context, flagSet *pflag.FlagSet) Factory {
 		signMode = signing.SignMode_SIGN_MODE_DIRECT
 	case flags.SignModeLegacyAminoJSON:
 		signMode = signing.SignMode_SIGN_MODE_LEGACY_AMINO_JSON
+	case flags.SignModeEIP191:
+		signMode = signing.SignMode_SIGN_MODE_EIP_191
 	}
 
 	accNum, _ := flagSet.GetUint64(flags.FlagAccountNumber)
@@ -254,12 +257,12 @@ func (f Factory) PrintUnsignedTx(clientCtx client.Context, msgs ...sdk.Msg) erro
 		_, _ = fmt.Fprintf(os.Stderr, "%s\n", GasEstimateResponse{GasEstimate: f.Gas()})
 	}
 
-	tx, err := f.BuildUnsignedTx(msgs...)
+	unsignedTx, err := f.BuildUnsignedTx(msgs...)
 	if err != nil {
 		return err
 	}
 
-	json, err := clientCtx.TxConfig.TxJSONEncoder()(tx.GetTx())
+	json, err := clientCtx.TxConfig.TxJSONEncoder()(unsignedTx.GetTx())
 	if err != nil {
 		return err
 	}
@@ -276,10 +279,25 @@ func (f Factory) BuildSimTx(msgs ...sdk.Msg) ([]byte, error) {
 		return nil, err
 	}
 
+	// use the first element from the list of keys in order to generate a valid
+	// pubkey that supports multiple algorithms
+
+	var pk cryptotypes.PubKey = &secp256k1.PubKey{} // use default public key type
+
+	if f.keybase != nil {
+		infos, _ := f.keybase.List()
+		if len(infos) == 0 {
+			return nil, errors.New("cannot build signature for simulation, key infos slice is empty")
+		}
+
+		// take the first info record just for simulation purposes
+		pk = infos[0].GetPubKey()
+	}
+
 	// Create an empty signature literal as the ante handler will populate with a
 	// sentinel pubkey.
 	sig := signing.SignatureV2{
-		PubKey: &secp256k1.PubKey{},
+		PubKey: pk,
 		Data: &signing.SingleSignatureData{
 			SignMode: f.signMode,
 		},

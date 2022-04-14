@@ -46,6 +46,10 @@ ifeq (cleveldb,$(findstring cleveldb,$(COSMOS_BUILD_OPTIONS)))
   build_tags += gcc
 endif
 
+ifeq (secp,$(findstring secp,$(COSMOS_BUILD_OPTIONS)))
+  build_tags += libsecp256k1_sdk
+endif
+
 whitespace :=
 whitespace += $(whitespace)
 comma := ,
@@ -331,13 +335,18 @@ containerMarkdownLintImage=tmknom/markdownlint
 containerMarkdownLint=cosmos-sdk-markdownlint
 containerMarkdownLintFix=cosmos-sdk-markdownlint-fix
 
-lint:
-	golangci-lint run --out-format=tab
-	@if docker ps -a --format '{{.Names}}' | grep -Eq "^${containerMarkdownLint}$$"; then docker start -a $(containerMarkdownLint); else docker run --name $(containerMarkdownLint) -i -v "$(CURDIR):/work" $(containerMarkdownLintImage); fi
+golangci_lint_cmd=go run github.com/golangci/golangci-lint/cmd/golangci-lint
+
+lint: lint-go
+	@if docker ps -a --format '{{.Names}}' | grep -Eq "^${containerMarkdownLint}$$"; then docker start -a $(containerMarkdownLint); else docker run --name $(containerMarkdownLint) -i -v "$(CURDIR):/work" $(markdownLintImage); fi
 
 lint-fix:
-	golangci-lint run --fix --out-format=tab --issues-exit-code=0
-	@if docker ps -a --format '{{.Names}}' | grep -Eq "^${containerMarkdownLintFix}$$"; then docker start -a $(containerMarkdownLintFix); else docker run --name $(containerMarkdownLintFix) -i -v "$(CURDIR):/work" $(containerMarkdownLintImage) . --fix; fi
+	$(golangci_lint_cmd) run --fix --out-format=tab --issues-exit-code=0
+	@if docker ps -a --format '{{.Names}}' | grep -Eq "^${containerMarkdownLintFix}$$"; then docker start -a $(containerMarkdownLintFix); else docker run --name $(containerMarkdownLintFix) -i -v "$(CURDIR):/work" $(markdownLintImage) . --fix; fi
+
+lint-go:
+	echo $(GIT_DIFF)
+	$(golangci_lint_cmd) run --out-format=tab $(GIT_DIFF)
 
 .PHONY: lint lint-fix
 
@@ -478,13 +487,8 @@ proto-update-deps:
 # Run a 4-node testnet locally
 localnet-start: build-linux localnet-stop
 	$(if $(shell $(DOCKER) inspect -f '{{ .Id }}' cosmossdk/simd-env 2>/dev/null),$(info found image cosmossdk/simd-env),$(MAKE) -C contrib/images simd-env)
-	if ! [ -f build/node0/simd/config/genesis.json ]; then $(DOCKER) run --rm \
-		--user $(shell id -u):$(shell id -g) \
-		-v $(BUILDDIR):/simd:Z \
-		-v /etc/group:/etc/group:ro \
-		-v /etc/passwd:/etc/passwd:ro \
-		-v /etc/shadow:/etc/shadow:ro \
-		cosmossdk/simd-env testnet --v 4 -o . --starting-ip-address 192.168.10.2 --keyring-backend=test ; fi
+	$(DOCKER) run --rm -v $(CURDIR)/localnet:/data cosmossdk/simd-env \
+		testnet init-files --v 4 -o /data --starting-ip-address 192.168.10.2 --keyring-backend=test
 	docker-compose up -d
 
 localnet-stop:

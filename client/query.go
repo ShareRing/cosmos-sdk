@@ -50,7 +50,9 @@ func (ctx Context) QueryStore(key tmbytes.HexBytes, storeName string) ([]byte, i
 }
 
 // QueryABCI performs a query to a Tendermint node with the provide RequestQuery.
-// It returns the ResultQuery obtained from the query.
+// It returns the ResultQuery obtained from the query. The height used to perform
+// the query is the RequestQuery Height if it is non-zero, otherwise the context
+// height is used.
 func (ctx Context) QueryABCI(req abci.RequestQuery) (abci.ResponseQuery, error) {
 	return ctx.queryABCI(req)
 }
@@ -76,8 +78,16 @@ func (ctx Context) queryABCI(req abci.RequestQuery) (abci.ResponseQuery, error) 
 		return abci.ResponseQuery{}, err
 	}
 
+	var queryHeight int64
+	if req.Height != 0 {
+		queryHeight = req.Height
+	} else {
+		// fallback on the context height
+		queryHeight = ctx.Height
+	}
+
 	opts := rpcclient.ABCIQueryOptions{
-		Height: ctx.Height,
+		Height: queryHeight,
 		Prove:  req.Prove,
 	}
 
@@ -116,8 +126,9 @@ func sdkErrorToGRPCError(resp abci.ResponseQuery) error {
 // or an error if the query fails.
 func (ctx Context) query(path string, key tmbytes.HexBytes) ([]byte, int64, error) {
 	resp, err := ctx.queryABCI(abci.RequestQuery{
-		Path: path,
-		Data: key,
+		Path:   path,
+		Data:   key,
+		Height: ctx.Height,
 	})
 	if err != nil {
 		return nil, 0, err
