@@ -1,12 +1,12 @@
 package keyring
 
 import (
+	"crypto/elliptic"
 	"encoding/hex"
 	"fmt"
 	"github.com/cosmos/cosmos-sdk/codec/legacy"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	"github.com/cosmos/cosmos-sdk/crypto/types"
-	crypto_eth "github.com/ethereum/go-ethereum/crypto"
 	"github.com/tendermint/btcd/btcec"
 	"github.com/tendermint/crypto/sha3"
 	"github.com/tendermint/tendermint/crypto"
@@ -40,7 +40,10 @@ func (pubKey *PubKeyETH) Address() crypto.Address {
 	if e != nil {
 		panic(e)
 	}
-	ethPKBytes := crypto_eth.FromECDSAPub(scp.ToECDSA())
+	if scp.ToECDSA() == nil || scp.ToECDSA().X == nil || scp.ToECDSA().Y == nil {
+		return nil
+	}
+	ethPKBytes := elliptic.Marshal(btcec.S256(), scp.ToECDSA().X, scp.ToECDSA().Y)
 	hash := sha3.NewLegacyKeccak256()
 	hash.Write(ethPKBytes[1:])
 	b := crypto.Address(hash.Sum(nil)[12:])
