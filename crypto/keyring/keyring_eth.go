@@ -1,19 +1,24 @@
 package keyring
 
 import (
+	"context"
 	"crypto/elliptic"
 	"encoding/hex"
 	"fmt"
 	"github.com/cosmos/cosmos-sdk/codec/legacy"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	"github.com/cosmos/cosmos-sdk/crypto/types"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	ethcommon "github.com/ethereum/go-ethereum/common"
+	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/tendermint/btcd/btcec"
 	"github.com/tendermint/crypto/sha3"
 	"github.com/tendermint/tendermint/crypto"
 	"github.com/tendermint/tendermint/libs/bytes"
+	"math/big"
 )
 
-type keystoreEIP712 struct {
+type keystoreEth struct {
 	keystore
 }
 
@@ -26,7 +31,6 @@ type EthAddress struct {
 }
 
 func (addr EthAddress) hex() []byte {
-
 	buf := make([]byte, 0, len(addr.Bytes())*2+2)
 	copy(buf[:2], "0x")
 	hex.Encode(buf[2:], addr.Bytes()[:])
@@ -50,7 +54,7 @@ func (pubKey *PubKeyETH) Address() crypto.Address {
 	return b
 }
 
-// VerifySignature eip712 signed data.
+// VerifySignature signed data.
 func (pubKey *PubKeyETH) VerifySignature(signHash []byte, signature []byte) bool {
 	if len(signature) != 65 {
 		return false
@@ -69,41 +73,74 @@ func (pubKey *PubKeyETH) VerifySignature(signHash []byte, signature []byte) bool
 	return parsedPubKey.IsEqual(p)
 }
 
-func NewKeyRingEIP712(kr Keyring) Keyring {
-	return keystoreEIP712{kr.(keystore)}
+func NewKeyRingETH(kr Keyring) Keyring {
+	return keystoreEth{kr.(keystore)}
 }
 
-func (ks keystoreEIP712) Sign(uid string, msg []byte) ([]byte, types.PubKey, error) {
-	info, err := ks.Key(uid)
+// Sign Implement Signer for cosmos sdk interface for eth
+func (ks keystoreEth) Sign(uid string, msg []byte) ([]byte, types.PubKey, error) {
+	priv, err := ks.getPriv(uid)
 	if err != nil {
 		return nil, nil, err
 	}
-	var priv types.PrivKey
+	return sign(priv, msg)
+}
 
+func (ks keystoreEth) getPriv(uid string) (types.PrivKey, error) {
+	info, err := ks.Key(uid)
+	if err != nil {
+		return nil, err
+	}
+	var priv types.PrivKey
 	switch i := info.(type) {
 	case localInfo:
 		if i.PrivKeyArmor == "" {
-			return nil, nil, fmt.Errorf("private key not available")
+			return nil, fmt.Errorf("private key not available")
 		}
 		priv, err = legacy.PrivKeyFromBytes([]byte(i.PrivKeyArmor))
-		if err != nil {
-			return nil, nil, err
-		}
+		return priv, err
 	default:
-		return nil, nil, fmt.Errorf("eip712 currently supports for local key")
+		return nil, fmt.Errorf("currently supports for local key only")
 	}
-	return signEIP712(priv, msg)
 }
 
-func signEIP712(priv types.PrivKey, msg []byte) ([]byte, types.PubKey, error) {
+func sign(priv types.PrivKey, msg []byte) ([]byte, types.PubKey, error) {
 	secp256k1Priv, ok := priv.(*secp256k1.PrivKey)
+
 	if !ok {
 		return nil, nil, fmt.Errorf("prv key could not converted into secp256k1 priv key")
 	}
-	privEIP712Signer := secp256k1.PrivKeyEIP712Signer{PrivKey: *secp256k1Priv}
-	sig, err := privEIP712Signer.Sign(msg)
+	privSigner := secp256k1.PrivKeyEth{PrivKey: *secp256k1Priv}
+	sig, err := privSigner.Sign(msg)
 	if err != nil {
 		return nil, nil, err
 	}
-	return sig, &PubKeyETH{privEIP712Signer.PubKey()}, nil
+	return sig, &PubKeyETH{privSigner.PubKey()}, nil
+}
+
+// NewKeyedTransactorWithChainID return SignerFn for go-eth
+// it uses uid name for getting priv key and address instead of passed eth.Address
+func NewKeyedTransactorWithChainID(kr Keyring, uid string, chainID *big.Int) (*bind.TransactOpts, error) {
+	ks := keystoreEth{kr.(keystore)}
+	priv, err := ks.getPriv(uid)
+	if err != nil {
+		return nil, err
+	}
+	pubKey := PubKeyETH{priv.PubKey()}
+	keyAddr := ethcommon.BytesToAddress(pubKey.Address())
+	signer := ethtypes.LatestSignerForChainID(chainID)
+	return &bind.TransactOpts{
+		Context: context.Background(),
+		From:    keyAddr,
+		Signer: func(addr ethcommon.Address, tx *ethtypes.Transaction) (*ethtypes.Transaction, error) {
+			if addr != keyAddr {
+				return nil, bind.ErrNotAuthorized
+			}
+			signature, _, err := ks.Sign(uid, signer.Hash(tx).Bytes())
+			if err != nil {
+				return nil, err
+			}
+			return tx.WithSignature(signer, signature)
+		},
+	}, nil
 }

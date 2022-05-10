@@ -4,12 +4,12 @@ import (
 	secp256k1 "github.com/btcsuite/btcd/btcec"
 )
 
-type PrivKeyEIP712Signer struct {
+type PrivKeyEth struct {
 	PrivKey
 }
 
 // Sign the provided hash and convert it to the ethereum (r,s,v) format.
-func (privKey *PrivKeyEIP712Signer) Sign(sighash []byte) ([]byte, error) { // TODO: Hoai check if this compatible with BEPs?
+func (privKey *PrivKeyEth) Sign(sighash []byte) ([]byte, error) { // TODO: Hoai check if this compatible with BEPs?
 	priv, _ := secp256k1.PrivKeyFromBytes(secp256k1.S256(), privKey.Key)
 	signature, err := secp256k1.SignCompact(secp256k1.S256(), priv, sighash, false)
 	if err != nil {
