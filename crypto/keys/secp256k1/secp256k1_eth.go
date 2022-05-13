@@ -9,7 +9,7 @@ type PrivKeyEth struct {
 }
 
 // Sign the provided hash and convert it to the ethereum (r,s,v) format.
-func (privKey *PrivKeyEth) Sign(sighash []byte) ([]byte, error) { // TODO: Hoai check if this compatible with BEPs?
+func (privKey *PrivKeyEth) Sign(sighash []byte) ([]byte, error) {
 	priv, _ := secp256k1.PrivKeyFromBytes(secp256k1.S256(), privKey.Key)
 	signature, err := secp256k1.SignCompact(secp256k1.S256(), priv, sighash, false)
 	if err != nil {

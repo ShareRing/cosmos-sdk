@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"encoding/hex"
 	"fmt"
+	btcec2 "github.com/btcsuite/btcd/btcec/v2"
 	"github.com/cosmos/cosmos-sdk/codec/legacy"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	"github.com/cosmos/cosmos-sdk/crypto/types"
@@ -118,6 +119,20 @@ func sign(priv types.PrivKey, msg []byte) ([]byte, types.PubKey, error) {
 	return sig, &PubKeyETH{privSigner.PubKey()}, nil
 }
 
+func (ks keystoreEth) SignTx(tx *ethtypes.Transaction, signer ethtypes.Signer, uid string) (*ethtypes.Transaction, error) {
+	priv, err := ks.getPriv(uid)
+	if err != nil {
+		return nil, err
+	}
+	secp256k1Priv, ok := priv.(*secp256k1.PrivKey)
+	if !ok {
+		return nil, fmt.Errorf("prv key could not converted into secp256k1 priv key")
+	}
+	btcePriv, _ := btcec2.PrivKeyFromBytes(secp256k1Priv.Key)
+	ecdaPriv := btcePriv.ToECDSA()
+	return ethtypes.SignTx(tx, signer, ecdaPriv)
+}
+
 // NewKeyedTransactorWithChainID return SignerFn for go-eth
 // it uses uid name for getting priv key and address instead of passed eth.Address
 func NewKeyedTransactorWithChainID(kr Keyring, uid string, chainID *big.Int) (*bind.TransactOpts, error) {
@@ -136,11 +151,7 @@ func NewKeyedTransactorWithChainID(kr Keyring, uid string, chainID *big.Int) (*b
 			if addr != keyAddr {
 				return nil, bind.ErrNotAuthorized
 			}
-			signature, _, err := ks.Sign(uid, signer.Hash(tx).Bytes())
-			if err != nil {
-				return nil, err
-			}
-			return tx.WithSignature(signer, signature)
+			return ks.SignTx(tx, signer, uid)
 		},
 	}, nil
 }
