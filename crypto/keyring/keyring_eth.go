@@ -124,11 +124,7 @@ func (ks keystoreEth) SignTx(tx *ethtypes.Transaction, signer ethtypes.Signer, u
 	if err != nil {
 		return nil, err
 	}
-	secp256k1Priv, ok := priv.(*secp256k1.PrivKey)
-	if !ok {
-		return nil, fmt.Errorf("prv key could not converted into secp256k1 priv key")
-	}
-	btcePriv, _ := btcec2.PrivKeyFromBytes(secp256k1Priv.Key)
+	btcePriv, _ := btcec2.PrivKeyFromBytes(priv.Bytes())
 	ecdaPriv := btcePriv.ToECDSA()
 	return ethtypes.SignTx(tx, signer, ecdaPriv)
 }
