@@ -20,7 +20,7 @@ import (
 )
 
 type keystoreEth struct {
-	keystore
+	Keyring
 }
 
 type PubKeyETH struct {
@@ -75,7 +75,7 @@ func (pubKey *PubKeyETH) VerifySignature(signHash []byte, signature []byte) bool
 }
 
 func NewKeyRingETH(kr Keyring) Keyring {
-	return keystoreEth{kr.(keystore)}
+	return keystoreEth{kr}
 }
 
 // Sign Implement Signer for cosmos sdk interface for eth
@@ -132,7 +132,7 @@ func (ks keystoreEth) SignTx(tx *ethtypes.Transaction, signer ethtypes.Signer, u
 // NewKeyedTransactorWithChainID return SignerFn for go-eth
 // it uses uid name for getting priv key and address instead of passed eth.Address
 func NewKeyedTransactorWithChainID(kr Keyring, uid string, chainID *big.Int) (*bind.TransactOpts, error) {
-	ks := keystoreEth{kr.(keystore)}
+	ks := keystoreEth{kr}
 	priv, err := ks.getPriv(uid)
 	if err != nil {
 		return nil, err
