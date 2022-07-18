@@ -544,7 +544,10 @@ func (app *BaseApp) ApplySnapshotChunk(req abci.RequestApplySnapshotChunk) abci.
 		return abci.ResponseApplySnapshotChunk{Result: abci.ResponseApplySnapshotChunk_ABORT}
 	}
 
+	fmt.Println("RESTORE CHUNK START HERE: ", req.Chunk, req.Index, req.Sender)
+
 	_, err := app.snapshotManager.RestoreChunk(req.Chunk)
+	fmt.Println("ERROR RESTORE CHUNK IF ANY: ", err)
 	switch {
 	case err == nil:
 		return abci.ResponseApplySnapshotChunk{Result: abci.ResponseApplySnapshotChunk_ACCEPT}
