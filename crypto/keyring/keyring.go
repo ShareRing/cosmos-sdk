@@ -200,6 +200,10 @@ type keystore struct {
 	options Options
 }
 
+func NewKeyStore(kr keyring.Keyring, opts ...Option) keystore {
+	return newKeystore(kr, opts...)
+}
+
 func newKeystore(kr keyring.Keyring, opts ...Option) keystore {
 	// Default options for keybase
 	options := Options{
