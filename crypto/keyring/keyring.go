@@ -209,6 +209,9 @@ type keystore struct {
 	options Options
 }
 
+func NewKeyStore(kr keyring.Keyring, cdc codec.Codec, backend string, opts ...Option) keystore {
+	return newKeystore(kr, cdc, backend, opts...)
+}
 func newKeystore(kr keyring.Keyring, cdc codec.Codec, backend string, opts ...Option) keystore {
 	// Default options for keybase, these can be overwritten using the
 	// Option function
