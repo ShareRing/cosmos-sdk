@@ -676,7 +676,9 @@ func newFileBackendKeyringConfig(name, dir string, buf io.Reader) keyring.Config
 		FilePasswordFunc: newRealPrompt(fileDir, buf),
 	}
 }
-
+func NewRealPrompt(dir string, buf io.Reader) func(string) (string, error) {
+	return newRealPrompt(dir, buf)
+}
 func newRealPrompt(dir string, buf io.Reader) func(string) (string, error) {
 	return func(prompt string) (string, error) {
 		keyhashStored := false
