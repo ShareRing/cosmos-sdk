@@ -220,8 +220,21 @@ func readTxCommandFlags(clientCtx Context, flagSet *pflag.FlagSet) (Context, err
 		clientCtx = clientCtx.WithSignModeStr(signModeStr)
 	}
 
-	if clientCtx.FeeGranter == nil || flagSet.Changed(flags.FlagFeeAccount) {
-		granter, _ := flagSet.GetString(flags.FlagFeeAccount)
+	if clientCtx.FeePayer == nil || flagSet.Changed(flags.FlagFeePayer) {
+		payer, _ := flagSet.GetString(flags.FlagFeePayer)
+
+		if payer != "" {
+			payerAcc, err := sdk.AccAddressFromBech32(payer)
+			if err != nil {
+				return clientCtx, err
+			}
+
+			clientCtx = clientCtx.WithFeePayerAddress(payerAcc)
+		}
+	}
+
+	if clientCtx.FeeGranter == nil || flagSet.Changed(flags.FlagFeeGranter) {
+		granter, _ := flagSet.GetString(flags.FlagFeeGranter)
 
 		if granter != "" {
 			granterAcc, err := sdk.AccAddressFromBech32(granter)
@@ -233,17 +246,9 @@ func readTxCommandFlags(clientCtx Context, flagSet *pflag.FlagSet) (Context, err
 		}
 	}
 
-	keySeed, _ := flagSet.GetString(flags.FlagKeySeed)
-	if keySeed != "" || flagSet.Changed(flags.FlagKeySeed) {
-		clientCtx, err = CreateContextFromSeed(keySeed, clientCtx)
-		if err != nil {
-			return clientCtx, err
-		}
-	}
-
 	if clientCtx.From == "" || flagSet.Changed(flags.FlagFrom) {
 		from, _ := flagSet.GetString(flags.FlagFrom)
-		fromAddr, fromName, keyType, err := GetFromFields(clientCtx.Keyring, from, clientCtx.GenerateOnly)
+		fromAddr, fromName, keyType, err := GetFromFields(clientCtx, clientCtx.Keyring, from)
 		if err != nil {
 			return clientCtx, err
 		}
@@ -258,6 +263,25 @@ func readTxCommandFlags(clientCtx Context, flagSet *pflag.FlagSet) (Context, err
 			clientCtx = clientCtx.WithSignModeStr(flags.SignModeLegacyAminoJSON)
 		}
 	}
+
+	if !clientCtx.IsAux || flagSet.Changed(flags.FlagAux) {
+		isAux, _ := flagSet.GetBool(flags.FlagAux)
+		clientCtx = clientCtx.WithAux(isAux)
+		if isAux {
+			// If the user didn't explicitly set an --output flag, use JSON by
+			// default.
+			if clientCtx.OutputFormat == "" || !flagSet.Changed(cli.OutputFlag) {
+				clientCtx = clientCtx.WithOutputFormat("json")
+			}
+
+			// If the user didn't explicitly set a --sign-mode flag, use
+			// DIRECT_AUX by default.
+			if clientCtx.SignModeStr == "" || !flagSet.Changed(flags.FlagSignMode) {
+				clientCtx = clientCtx.WithSignModeStr(flags.SignModeDirectAux)
+			}
+		}
+	}
+
 	return clientCtx, nil
 }
 
