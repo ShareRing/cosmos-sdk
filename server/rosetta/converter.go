@@ -6,30 +6,25 @@ import (
 	"fmt"
 	"reflect"
 
-	auth "github.com/cosmos/cosmos-sdk/x/auth/types"
-
-	"github.com/tendermint/tendermint/crypto"
-
+	"cosmossdk.io/math"
 	"github.com/btcsuite/btcd/btcec"
-	tmcoretypes "github.com/tendermint/tendermint/rpc/core/types"
-
-	crgtypes "github.com/cosmos/cosmos-sdk/server/rosetta/lib/types"
-
-	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
-	"github.com/cosmos/cosmos-sdk/types/tx/signing"
-
 	rosettatypes "github.com/coinbase/rosetta-sdk-go/types"
 	abci "github.com/tendermint/tendermint/abci/types"
+	"github.com/tendermint/tendermint/crypto"
+	tmcoretypes "github.com/tendermint/tendermint/rpc/core/types"
 	tmtypes "github.com/tendermint/tendermint/types"
-
-	crgerrs "github.com/cosmos/cosmos-sdk/server/rosetta/lib/errors"
 
 	sdkclient "github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
+	crgerrs "github.com/cosmos/cosmos-sdk/server/rosetta/lib/errors"
+	crgtypes "github.com/cosmos/cosmos-sdk/server/rosetta/lib/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/tx/signing"
 	authsigning "github.com/cosmos/cosmos-sdk/x/auth/signing"
+	auth "github.com/cosmos/cosmos-sdk/x/auth/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 )
 
@@ -302,7 +297,7 @@ func (c converter) Tx(rawTx tmtypes.Tx, txResult *abci.ResponseDeliverTx) (*rose
 	var balanceOps []*rosettatypes.Operation
 	// tx result might be nil, in case we're querying an unconfirmed tx from the mempool
 	if txResult != nil {
-		balanceOps = c.BalanceOps(status, txResult.Events)
+		balanceOps = c.BalanceOps(StatusTxSuccess, txResult.Events) // force set to success because no events for failed tx
 	}
 
 	// now normalize indexes
@@ -343,8 +338,8 @@ func sdkEventToBalanceOperations(status string, event abci.Event) (operations []
 	default:
 		return nil, false
 	case banktypes.EventTypeCoinSpent:
-		spender := sdk.MustAccAddressFromBech32((string)(event.Attributes[0].Value))
-		coins, err := sdk.ParseCoinsNormalized((string)(event.Attributes[1].Value))
+		spender := sdk.MustAccAddressFromBech32(string(event.Attributes[0].Value))
+		coins, err := sdk.ParseCoinsNormalized(string(event.Attributes[1].Value))
 		if err != nil {
 			panic(err)
 		}
@@ -354,8 +349,8 @@ func sdkEventToBalanceOperations(status string, event abci.Event) (operations []
 		accountIdentifier = spender.String()
 
 	case banktypes.EventTypeCoinReceived:
-		receiver := sdk.MustAccAddressFromBech32((string)(event.Attributes[0].Value))
-		coins, err := sdk.ParseCoinsNormalized((string)(event.Attributes[1].Value))
+		receiver := sdk.MustAccAddressFromBech32(string(event.Attributes[0].Value))
+		coins, err := sdk.ParseCoinsNormalized(string(event.Attributes[1].Value))
 		if err != nil {
 			panic(err)
 		}
@@ -367,7 +362,7 @@ func sdkEventToBalanceOperations(status string, event abci.Event) (operations []
 	// rosetta does not have the concept of burning coins, so we need to mock
 	// the burn as a send to an address that cannot be resolved to anything
 	case banktypes.EventTypeCoinBurn:
-		coins, err := sdk.ParseCoinsNormalized((string)(event.Attributes[1].Value))
+		coins, err := sdk.ParseCoinsNormalized(string(event.Attributes[1].Value))
 		if err != nil {
 			panic(err)
 		}
@@ -408,7 +403,7 @@ func sdkEventToBalanceOperations(status string, event abci.Event) (operations []
 // Amounts converts []sdk.Coin to rosetta amounts
 func (c converter) Amounts(ownedCoins []sdk.Coin, availableCoins sdk.Coins) []*rosettatypes.Amount {
 	amounts := make([]*rosettatypes.Amount, len(availableCoins))
-	ownedCoinsMap := make(map[string]sdk.Int, len(availableCoins))
+	ownedCoinsMap := make(map[string]math.Int, len(availableCoins))
 
 	for _, ownedCoin := range ownedCoins {
 		ownedCoinsMap[ownedCoin.Denom] = ownedCoin.Amount
@@ -712,9 +707,11 @@ func (c converter) SigningComponents(tx authsigning.Tx, metadata *ConstructionMe
 
 		// set the signer data
 		signerData := authsigning.SignerData{
+			Address:       signer.String(),
 			ChainID:       metadata.ChainID,
 			AccountNumber: metadata.SignersData[i].AccountNumber,
 			Sequence:      metadata.SignersData[i].Sequence,
+			PubKey:        pubKey,
 		}
 
 		// get signature bytes

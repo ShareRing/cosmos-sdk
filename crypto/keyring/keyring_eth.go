@@ -3,8 +3,9 @@ package keyring
 import (
 	"context"
 	"crypto/elliptic"
-	"encoding/hex"
 	"fmt"
+	"math/big"
+
 	btcec2 "github.com/btcsuite/btcd/btcec/v2"
 	"github.com/cosmos/cosmos-sdk/codec/legacy"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
@@ -16,7 +17,6 @@ import (
 	"github.com/tendermint/crypto/sha3"
 	"github.com/tendermint/tendermint/crypto"
 	"github.com/tendermint/tendermint/libs/bytes"
-	"math/big"
 )
 
 type keystoreEth struct {
@@ -29,13 +29,6 @@ type PubKeyETH struct {
 
 type EthAddress struct {
 	bytes.HexBytes
-}
-
-func (addr EthAddress) hex() []byte {
-	buf := make([]byte, 0, len(addr.Bytes())*2+2)
-	copy(buf[:2], "0x")
-	hex.Encode(buf[2:], addr.Bytes()[:])
-	return buf[:]
 }
 
 // Address return ETH address style
@@ -88,17 +81,17 @@ func (ks keystoreEth) Sign(uid string, msg []byte) ([]byte, types.PubKey, error)
 }
 
 func (ks keystoreEth) getPriv(uid string) (types.PrivKey, error) {
-	info, err := ks.Key(uid)
+	record, err := ks.Key(uid)
 	if err != nil {
 		return nil, err
 	}
 	var priv types.PrivKey
-	switch i := info.(type) {
-	case localInfo:
-		if i.PrivKeyArmor == "" {
+	switch i := record.Item.(type) {
+	case *Record_Local_:
+		if i.Local.PrivKey == nil {
 			return nil, fmt.Errorf("private key not available")
 		}
-		priv, err = legacy.PrivKeyFromBytes([]byte(i.PrivKeyArmor))
+		priv, err = legacy.PrivKeyFromBytes(i.Local.PrivKey.Value)
 		return priv, err
 	default:
 		return nil, fmt.Errorf("currently supports for local key only")

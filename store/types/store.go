@@ -5,9 +5,9 @@ import (
 	"io"
 
 	abci "github.com/tendermint/tendermint/abci/types"
-	tmstrings "github.com/tendermint/tendermint/libs/strings"
 	dbm "github.com/tendermint/tm-db"
 
+	pruningtypes "github.com/cosmos/cosmos-sdk/pruning/types"
 	snapshottypes "github.com/cosmos/cosmos-sdk/snapshots/types"
 	"github.com/cosmos/cosmos-sdk/types/kv"
 )
@@ -22,8 +22,8 @@ type Committer interface {
 	Commit() CommitID
 	LastCommitID() CommitID
 
-	SetPruning(PruningOptions)
-	GetPruning() PruningOptions
+	SetPruning(pruningtypes.PruningOptions)
+	GetPruning() pruningtypes.PruningOptions
 }
 
 // Stores of MultiStore must implement CommitStore.
@@ -50,13 +50,6 @@ type StoreUpgrades struct {
 	Deleted []string      `json:"deleted"`
 }
 
-// UpgradeInfo defines height and name of the upgrade
-// to ensure multistore upgrades happen only at matching height.
-type UpgradeInfo struct {
-	Name   string `json:"name"`
-	Height int64  `json:"height"`
-}
-
 // StoreRename defines a name change of a sub-store.
 // All data previously under a PrefixStore with OldKey will be copied
 // to a PrefixStore with NewKey, then deleted from OldKey store.
@@ -65,12 +58,17 @@ type StoreRename struct {
 	NewKey string `json:"new_key"`
 }
 
-// IsDeleted returns true if the given key should be added
+// IsAdded returns true if the given key should be added
 func (s *StoreUpgrades) IsAdded(key string) bool {
 	if s == nil {
 		return false
 	}
-	return tmstrings.StringInSlice(key, s.Added)
+	for _, added := range s.Added {
+		if key == added {
+			return true
+		}
+	}
+	return false
 }
 
 // IsDeleted returns true if the given key should be deleted
@@ -201,11 +199,9 @@ type CommitMultiStore interface {
 //---------subsp-------------------------------
 // KVStore
 
-// KVStore is a simple interface to get/set data
-type KVStore interface {
-	Store
-
-	// Get returns nil iff key doesn't exist. Panics on nil key.
+// BasicKVStore is a simple interface to get/set data
+type BasicKVStore interface {
+	// Get returns nil if key doesn't exist. Panics on nil key.
 	Get(key []byte) []byte
 
 	// Has checks if a key exists. Panics on nil key.
@@ -216,6 +212,12 @@ type KVStore interface {
 
 	// Delete deletes the key. Panics on nil key.
 	Delete(key []byte)
+}
+
+// KVStore additionally provides iteration and deletion
+type KVStore interface {
+	Store
+	BasicKVStore
 
 	// Iterator over a domain of keys in ascending order. End is exclusive.
 	// Start must be less than end, or the Iterator is invalid.
@@ -304,6 +306,8 @@ const (
 	StoreTypeIAVL
 	StoreTypeTransient
 	StoreTypeMemory
+	StoreTypeSMT
+	StoreTypePersistent
 )
 
 func (st StoreType) String() string {
@@ -322,6 +326,12 @@ func (st StoreType) String() string {
 
 	case StoreTypeMemory:
 		return "StoreTypeMemory"
+
+	case StoreTypeSMT:
+		return "StoreTypeSMT"
+
+	case StoreTypePersistent:
+		return "StoreTypePersistent"
 	}
 
 	return "unknown store type"
@@ -337,7 +347,7 @@ type StoreKey interface {
 }
 
 // CapabilityKey represent the Cosmos SDK keys for object-capability
-// generation in the IBC protocol as defined in https://github.com/cosmos/ics/tree/master/spec/ics-005-port-allocation#data-structures
+// generation in the IBC protocol as defined in https://github.com/cosmos/ibc/tree/master/spec/core/ics-005-port-allocation#data-structures
 type CapabilityKey StoreKey
 
 // KVStoreKey is used for accessing substores.
@@ -417,6 +427,29 @@ type KVPair kv.Pair
 // TraceContext contains TraceKVStore context data. It will be written with
 // every trace operation.
 type TraceContext map[string]interface{}
+
+// Clone clones tc into another instance of TraceContext.
+func (tc TraceContext) Clone() TraceContext {
+	ret := TraceContext{}
+	for k, v := range tc {
+		ret[k] = v
+	}
+
+	return ret
+}
+
+// Merge merges value of newTc into tc.
+func (tc TraceContext) Merge(newTc TraceContext) TraceContext {
+	if tc == nil {
+		tc = TraceContext{}
+	}
+
+	for k, v := range newTc {
+		tc[k] = v
+	}
+
+	return tc
+}
 
 // MultiStorePersistentCache defines an interface which provides inter-block
 // (persistent) caching capabilities for multiple CommitKVStores based on StoreKeys.

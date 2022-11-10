@@ -8,9 +8,6 @@ import (
 	rpchttp "github.com/tendermint/tendermint/rpc/client/http"
 
 	"github.com/cosmos/cosmos-sdk/client/flags"
-	"github.com/cosmos/cosmos-sdk/crypto/hd"
-	"github.com/cosmos/cosmos-sdk/crypto/keyring"
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	"github.com/cosmos/cosmos-sdk/types/query"
 )
@@ -79,8 +76,6 @@ func ReadPageRequest(flagSet *pflag.FlagSet) (*query.PageRequest, error) {
 
 // NewClientFromNode sets up Client implementation that communicates with a Tendermint node over
 // JSON RPC and WebSockets
-// TODO: We might not need to manually append `/websocket`:
-// https://github.com/cosmos/cosmos-sdk/issues/8986
 func NewClientFromNode(nodeURI string) (*rpchttp.HTTP, error) {
 	return rpchttp.New(nodeURI, "/websocket")
 }
@@ -108,31 +103,4 @@ func GetAddressFromFile(filepath string) ([]string, error) {
 	var addrList []string
 	json.Unmarshal(data, &addrList)
 	return addrList, nil
-}
-
-func CreateContextWithKeyBase(seed string, clientCtx Context) (Context, error) {
-	kb := keyring.NewInMemory()
-	keyName := "elon_musk_deer"
-	info, err := kb.NewAccount(keyName, seed, "", sdk.GetConfig().Seal().GetFullBIP44Path(), hd.Secp256k1)
-	if err != nil {
-		return Context{}, err
-	}
-
-	clientCtx = clientCtx.WithFrom(keyName).WithFromName(info.GetName()).WithFromAddress(info.GetAddress()).WithKeyring(kb)
-
-	return clientCtx, nil
-}
-
-func CreateContextFromSeed(seedFile string, clientCtx Context) (Context, error) {
-	seed, err := GetKeySeedFromFile(seedFile)
-	if err != nil {
-		return Context{}, err
-	}
-
-	clientCtx, err = CreateContextWithKeyBase(seed, clientCtx)
-	if err != nil {
-		return Context{}, err
-	}
-
-	return clientCtx, nil
 }

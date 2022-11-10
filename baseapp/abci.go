@@ -24,6 +24,14 @@ import (
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 )
 
+// Supported ABCI Query prefixes
+const (
+	QueryPathApp    = "app"
+	QueryPathCustom = "custom"
+	QueryPathP2P    = "p2p"
+	QueryPathStore  = "store"
+)
+
 // InitChain implements the ABCI interface. It runs the initialization logic
 // directly on the CommitMultiStore.
 func (app *BaseApp) InitChain(req abci.RequestInitChain) (res abci.ResponseInitChain) {
@@ -104,6 +112,12 @@ func (app *BaseApp) InitChain(req abci.RequestInitChain) (res abci.ResponseInitC
 	}
 }
 
+// SetOption implements the ABCI interface.
+func (app *BaseApp) SetOption(req abci.RequestSetOption) (res abci.ResponseSetOption) {
+	// TODO: Implement!
+	return
+}
+
 // Info implements the ABCI interface.
 func (app *BaseApp) Info(req abci.RequestInfo) abci.ResponseInfo {
 	lastCommitID := app.cms.LastCommitID()
@@ -117,16 +131,8 @@ func (app *BaseApp) Info(req abci.RequestInfo) abci.ResponseInfo {
 	}
 }
 
-// SetOption implements the ABCI interface.
-func (app *BaseApp) SetOption(req abci.RequestSetOption) (res abci.ResponseSetOption) {
-	// TODO: Implement!
-	return
-}
-
 // BeginBlock implements the ABCI application interface.
 func (app *BaseApp) BeginBlock(req abci.RequestBeginBlock) (res abci.ResponseBeginBlock) {
-	defer telemetry.MeasureSince(time.Now(), "abci", "begin_block")
-
 	if app.cms.TracingEnabled() {
 		app.cms.SetTracingContext(sdk.TraceContext(
 			map[string]interface{}{"blockHeight": req.Header.Height},
@@ -192,8 +198,6 @@ func (app *BaseApp) BeginBlock(req abci.RequestBeginBlock) (res abci.ResponseBeg
 
 // EndBlock implements the ABCI interface.
 func (app *BaseApp) EndBlock(req abci.RequestEndBlock) (res abci.ResponseEndBlock) {
-	defer telemetry.MeasureSince(time.Now(), "abci", "end_block")
-
 	if app.deliverState.ms.TracingEnabled() {
 		app.deliverState.ms = app.deliverState.ms.SetTracingContext(nil).(sdk.CacheMultiStore)
 	}
@@ -224,8 +228,6 @@ func (app *BaseApp) EndBlock(req abci.RequestEndBlock) (res abci.ResponseEndBloc
 // will contain releveant error information. Regardless of tx execution outcome,
 // the ResponseCheckTx will contain relevant gas execution context.
 func (app *BaseApp) CheckTx(req abci.RequestCheckTx) abci.ResponseCheckTx {
-	defer telemetry.MeasureSince(time.Now(), "abci", "check_tx")
-
 	var mode runTxMode
 
 	switch {
@@ -239,7 +241,7 @@ func (app *BaseApp) CheckTx(req abci.RequestCheckTx) abci.ResponseCheckTx {
 		panic(fmt.Sprintf("unknown RequestCheckTx type: %s", req.Type))
 	}
 
-	gInfo, result, anteEvents, err := app.runTx(mode, req.Tx)
+	gInfo, result, anteEvents, priority, err := app.runTx(mode, req.Tx)
 	if err != nil {
 		return sdkerrors.ResponseCheckTxWithEvents(err, gInfo.GasWanted, gInfo.GasUsed, anteEvents, app.trace)
 	}
@@ -250,6 +252,7 @@ func (app *BaseApp) CheckTx(req abci.RequestCheckTx) abci.ResponseCheckTx {
 		Log:       result.Log,
 		Data:      result.Data,
 		Events:    sdk.MarkEventsToIndex(result.Events, app.indexEvents),
+		Priority:  priority,
 	}
 }
 
@@ -259,7 +262,8 @@ func (app *BaseApp) CheckTx(req abci.RequestCheckTx) abci.ResponseCheckTx {
 // Regardless of tx execution outcome, the ResponseDeliverTx will contain relevant
 // gas execution context.
 func (app *BaseApp) DeliverTx(req abci.RequestDeliverTx) (res abci.ResponseDeliverTx) {
-	defer telemetry.MeasureSince(time.Now(), "abci", "deliver_tx")
+	gInfo := sdk.GasInfo{}
+	resultStr := "successful"
 
 	defer func() {
 		for _, streamingListener := range app.abciListeners {
@@ -269,9 +273,6 @@ func (app *BaseApp) DeliverTx(req abci.RequestDeliverTx) (res abci.ResponseDeliv
 		}
 	}()
 
-	gInfo := sdk.GasInfo{}
-	resultStr := "successful"
-
 	defer func() {
 		telemetry.IncrCounter(1, "tx", "count")
 		telemetry.IncrCounter(1, "tx", resultStr)
@@ -279,7 +280,7 @@ func (app *BaseApp) DeliverTx(req abci.RequestDeliverTx) (res abci.ResponseDeliv
 		telemetry.SetGauge(float32(gInfo.GasWanted), "tx", "gas", "wanted")
 	}()
 
-	gInfo, result, anteEvents, err := app.runTx(runTxModeDeliver, req.Tx)
+	gInfo, result, anteEvents, _, err := app.runTx(runTxModeDeliver, req.Tx)
 	if err != nil {
 		resultStr = "failed"
 		return sdkerrors.ResponseDeliverTxWithEvents(err, gInfo.GasWanted, gInfo.GasUsed, sdk.MarkEventsToIndex(anteEvents, app.indexEvents), app.trace)
@@ -302,8 +303,6 @@ func (app *BaseApp) DeliverTx(req abci.RequestDeliverTx) (res abci.ResponseDeliv
 // against that height and gracefully halt if it matches the latest committed
 // height.
 func (app *BaseApp) Commit() (res abci.ResponseCommit) {
-	defer telemetry.MeasureSince(time.Now(), "abci", "commit")
-
 	header := app.deliverState.ctx.BlockHeader()
 	retainHeight := app.GetBlockRetentionHeight(header.Height)
 
@@ -341,9 +340,7 @@ func (app *BaseApp) Commit() (res abci.ResponseCommit) {
 		app.halt()
 	}
 
-	if app.snapshotInterval > 0 && uint64(header.Height)%app.snapshotInterval == 0 {
-		go app.snapshot(header.Height)
-	}
+	go app.snapshotManager.SnapshotIfApplicable(header.Height)
 
 	return abci.ResponseCommit{
 		Data:         commitID.Hash,
@@ -373,46 +370,14 @@ func (app *BaseApp) halt() {
 	os.Exit(0)
 }
 
-// snapshot takes a snapshot of the current state and prunes any old snapshottypes.
-func (app *BaseApp) snapshot(height int64) {
-	if app.snapshotManager == nil {
-		app.logger.Info("snapshot manager not configured")
-		return
-	}
-
-	app.logger.Info("creating state snapshot", "height", height)
-
-	snapshot, err := app.snapshotManager.Create(uint64(height))
-	if err != nil {
-		app.logger.Error("failed to create state snapshot", "height", height, "err", err)
-		return
-	}
-
-	app.logger.Info("completed state snapshot", "height", height, "format", snapshot.Format)
-
-	if app.snapshotKeepRecent > 0 {
-		app.logger.Debug("pruning state snapshots")
-
-		pruned, err := app.snapshotManager.Prune(app.snapshotKeepRecent)
-		if err != nil {
-			app.logger.Error("Failed to prune state snapshots", "err", err)
-			return
-		}
-
-		app.logger.Debug("pruned state snapshots", "pruned", pruned)
-	}
-}
-
 // Query implements the ABCI interface. It delegates to CommitMultiStore if it
 // implements Queryable.
 func (app *BaseApp) Query(req abci.RequestQuery) (res abci.ResponseQuery) {
-	defer telemetry.MeasureSince(time.Now(), "abci", "query")
-
 	// Add panic recovery for all queries.
 	// ref: https://github.com/cosmos/cosmos-sdk/pull/8039
 	defer func() {
 		if r := recover(); r != nil {
-			res = sdkerrors.QueryResultWithDebug(sdkerrors.Wrapf(sdkerrors.ErrPanic, "%v", r), app.trace)
+			res = sdkerrors.QueryResult(sdkerrors.Wrapf(sdkerrors.ErrPanic, "%v", r), app.trace)
 		}
 	}()
 
@@ -421,33 +386,37 @@ func (app *BaseApp) Query(req abci.RequestQuery) (res abci.ResponseQuery) {
 		req.Height = app.LastBlockHeight()
 	}
 
+	telemetry.IncrCounter(1, "query", "count")
+	telemetry.IncrCounter(1, "query", req.Path)
+	defer telemetry.MeasureSince(time.Now(), req.Path)
+
 	// handle gRPC routes first rather than calling splitPath because '/' characters
 	// are used as part of gRPC paths
 	if grpcHandler := app.grpcQueryRouter.Route(req.Path); grpcHandler != nil {
 		return app.handleQueryGRPC(grpcHandler, req)
 	}
 
-	path := splitPath(req.Path)
+	path := SplitABCIQueryPath(req.Path)
 	if len(path) == 0 {
-		return sdkerrors.QueryResultWithDebug(sdkerrors.Wrap(sdkerrors.ErrUnknownRequest, "no query path provided"), app.trace)
+		return sdkerrors.QueryResult(sdkerrors.Wrap(sdkerrors.ErrUnknownRequest, "no query path provided"), app.trace)
 	}
 
 	switch path[0] {
-	// "/app" prefix for special application queries
-	case "app":
+	case QueryPathApp:
+		// "/app" prefix for special application queries
 		return handleQueryApp(app, path, req)
 
-	case "store":
+	case QueryPathStore:
 		return handleQueryStore(app, path, req)
 
-	case "p2p":
+	case QueryPathP2P:
 		return handleQueryP2P(app, path)
 
-	case "custom":
+	case QueryPathCustom:
 		return handleQueryCustom(app, path, req)
 	}
 
-	return sdkerrors.QueryResultWithDebug(sdkerrors.Wrap(sdkerrors.ErrUnknownRequest, "unknown query path"), app.trace)
+	return sdkerrors.QueryResult(sdkerrors.Wrap(sdkerrors.ErrUnknownRequest, "unknown query path"), app.trace)
 }
 
 // ListSnapshots implements the ABCI interface. It delegates to app.snapshotManager if set.
@@ -577,12 +546,12 @@ func (app *BaseApp) ApplySnapshotChunk(req abci.RequestApplySnapshotChunk) abci.
 func (app *BaseApp) handleQueryGRPC(handler GRPCQueryHandler, req abci.RequestQuery) abci.ResponseQuery {
 	ctx, err := app.createQueryContext(req.Height, req.Prove)
 	if err != nil {
-		return sdkerrors.QueryResultWithDebug(err, app.trace)
+		return sdkerrors.QueryResult(err, app.trace)
 	}
 
 	res, err := handler(ctx, req)
 	if err != nil {
-		res = sdkerrors.QueryResultWithDebug(gRPCErrorToSDKError(err), app.trace)
+		res = sdkerrors.QueryResult(gRPCErrorToSDKError(err), app.trace)
 		res.Height = req.Height
 		return res
 	}
@@ -722,25 +691,11 @@ func (app *BaseApp) GetBlockRetentionHeight(commitHeight int64) int64 {
 		retentionHeight = commitHeight - cp.Evidence.MaxAgeNumBlocks
 	}
 
-	// Define the state pruning offset, i.e. the block offset at which the
-	// underlying logical database is persisted to disk.
-	statePruningOffset := int64(app.cms.GetPruning().KeepEvery)
-	if statePruningOffset > 0 {
-		if commitHeight > statePruningOffset {
-			v := commitHeight - (commitHeight % statePruningOffset)
-			retentionHeight = minNonZero(retentionHeight, v)
-		} else {
-			// Hitting this case means we have persisting enabled but have yet to reach
-			// a height in which we persist state, so we return zero regardless of other
-			// conditions. Otherwise, we could end up pruning blocks without having
-			// any state committed to disk.
-			return 0
+	if app.snapshotManager != nil {
+		snapshotRetentionHeights := app.snapshotManager.GetSnapshotBlockRetentionHeights()
+		if snapshotRetentionHeights > 0 {
+			retentionHeight = minNonZero(retentionHeight, commitHeight-snapshotRetentionHeights)
 		}
-	}
-
-	if app.snapshotInterval > 0 && app.snapshotKeepRecent > 0 {
-		v := commitHeight - int64((app.snapshotInterval * uint64(app.snapshotKeepRecent)))
-		retentionHeight = minNonZero(retentionHeight, v)
 	}
 
 	v := commitHeight - int64(app.minRetainBlocks)
@@ -762,7 +717,7 @@ func handleQueryApp(app *BaseApp, path []string, req abci.RequestQuery) abci.Res
 
 			gInfo, res, err := app.Simulate(txBytes)
 			if err != nil {
-				return sdkerrors.QueryResultWithDebug(sdkerrors.Wrap(err, "failed to simulate tx"), app.trace)
+				return sdkerrors.QueryResult(sdkerrors.Wrap(err, "failed to simulate tx"), app.trace)
 			}
 
 			simRes := &sdk.SimulationResponse{
@@ -772,7 +727,7 @@ func handleQueryApp(app *BaseApp, path []string, req abci.RequestQuery) abci.Res
 
 			bz, err := codec.ProtoMarshalJSON(simRes, app.interfaceRegistry)
 			if err != nil {
-				return sdkerrors.QueryResultWithDebug(sdkerrors.Wrap(err, "failed to JSON encode simulation response"), app.trace)
+				return sdkerrors.QueryResult(sdkerrors.Wrap(err, "failed to JSON encode simulation response"), app.trace)
 			}
 
 			return abci.ResponseQuery{
@@ -795,7 +750,7 @@ func handleQueryApp(app *BaseApp, path []string, req abci.RequestQuery) abci.Res
 
 			responseValue, err := json.Marshal(response)
 			if err != nil {
-				sdkerrors.QueryResult(sdkerrors.Wrap(err, fmt.Sprintf("failed to marshal list snapshots response %v", response)))
+				return sdkerrors.QueryResult(sdkerrors.Wrap(err, fmt.Sprintf("failed to marshal list snapshots response %v", response)), app.trace)
 			}
 
 			return abci.ResponseQuery{
@@ -805,11 +760,11 @@ func handleQueryApp(app *BaseApp, path []string, req abci.RequestQuery) abci.Res
 			}
 
 		default:
-			return sdkerrors.QueryResultWithDebug(sdkerrors.Wrapf(sdkerrors.ErrUnknownRequest, "unknown query: %s", path), app.trace)
+			return sdkerrors.QueryResult(sdkerrors.Wrapf(sdkerrors.ErrUnknownRequest, "unknown query: %s", path), app.trace)
 		}
 	}
 
-	return sdkerrors.QueryResultWithDebug(
+	return sdkerrors.QueryResult(
 		sdkerrors.Wrap(
 			sdkerrors.ErrUnknownRequest,
 			"expected second parameter to be either 'simulate' or 'version', neither was present",
@@ -820,13 +775,13 @@ func handleQueryStore(app *BaseApp, path []string, req abci.RequestQuery) abci.R
 	// "/store" prefix for store queries
 	queryable, ok := app.cms.(sdk.Queryable)
 	if !ok {
-		return sdkerrors.QueryResultWithDebug(sdkerrors.Wrap(sdkerrors.ErrUnknownRequest, "multistore doesn't support queries"), app.trace)
+		return sdkerrors.QueryResult(sdkerrors.Wrap(sdkerrors.ErrUnknownRequest, "multistore doesn't support queries"), app.trace)
 	}
 
 	req.Path = "/" + strings.Join(path[1:], "/")
 
 	if req.Height <= 1 && req.Prove {
-		return sdkerrors.QueryResultWithDebug(
+		return sdkerrors.QueryResult(
 			sdkerrors.Wrap(
 				sdkerrors.ErrInvalidRequest,
 				"cannot query with proof when height <= 1; please provide a valid height",
@@ -846,17 +801,17 @@ func handleQueryCustom(app *BaseApp, path []string, req abci.RequestQuery) abci.
 	// The QueryRouter routes using path[1]. For example, in the path
 	// "custom/gov/proposal", QueryRouter routes using "gov".
 	if len(path) < 2 || path[1] == "" {
-		return sdkerrors.QueryResultWithDebug(sdkerrors.Wrap(sdkerrors.ErrUnknownRequest, "no route for custom query specified"), app.trace)
+		return sdkerrors.QueryResult(sdkerrors.Wrap(sdkerrors.ErrUnknownRequest, "no route for custom query specified"), app.trace)
 	}
 
 	querier := app.queryRouter.Route(path[1])
 	if querier == nil {
-		return sdkerrors.QueryResultWithDebug(sdkerrors.Wrapf(sdkerrors.ErrUnknownRequest, "no custom querier found for route %s", path[1]), app.trace)
+		return sdkerrors.QueryResult(sdkerrors.Wrapf(sdkerrors.ErrUnknownRequest, "no custom querier found for route %s", path[1]), app.trace)
 	}
 
 	ctx, err := app.createQueryContext(req.Height, req.Prove)
 	if err != nil {
-		return sdkerrors.QueryResultWithDebug(err, app.trace)
+		return sdkerrors.QueryResult(err, app.trace)
 	}
 
 	// Passes the rest of the path as an argument to the querier.
@@ -865,7 +820,7 @@ func handleQueryCustom(app *BaseApp, path []string, req abci.RequestQuery) abci.
 	// []string{"proposal", "test"} as the path.
 	resBytes, err := querier(ctx, path[2:], req)
 	if err != nil {
-		res := sdkerrors.QueryResultWithDebug(err, app.trace)
+		res := sdkerrors.QueryResult(err, app.trace)
 		res.Height = req.Height
 		return res
 	}
@@ -876,10 +831,10 @@ func handleQueryCustom(app *BaseApp, path []string, req abci.RequestQuery) abci.
 	}
 }
 
-// splitPath splits a string path using the delimiter '/'.
+// SplitABCIQueryPath splits a string path using the delimiter '/'.
 //
 // e.g. "this/is/funny" becomes []string{"this", "is", "funny"}
-func splitPath(requestPath string) (path []string) {
+func SplitABCIQueryPath(requestPath string) (path []string) {
 	path = strings.Split(requestPath, "/")
 
 	// first element is empty string

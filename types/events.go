@@ -130,7 +130,7 @@ func ParseTypedEvent(event abci.Event) (proto.Message, error) {
 
 	attrMap := make(map[string]json.RawMessage)
 	for _, attr := range event.Attributes {
-		attrMap[string(attr.Key)] = attr.Value
+		attrMap[string(attr.Key)] = json.RawMessage(attr.Value)
 	}
 
 	attrBytes, err := json.Marshal(attrMap)
@@ -189,6 +189,17 @@ func (a Attribute) ToKVPair() abci.EventAttribute {
 	return abci.EventAttribute{Key: toBytes(a.Key), Value: toBytes(a.Value)}
 }
 
+func toBytes(i interface{}) []byte {
+	switch x := i.(type) {
+	case []uint8:
+		return x
+	case string:
+		return []byte(x)
+	default:
+		panic(i)
+	}
+}
+
 // AppendAttributes adds one or more attributes to an Event.
 func (e Event) AppendAttributes(attrs ...Attribute) Event {
 	for _, attr := range attrs {
@@ -218,19 +229,8 @@ func (e Events) ToABCIEvents() []abci.Event {
 	return res
 }
 
-func toBytes(i interface{}) []byte {
-	switch x := i.(type) {
-	case []uint8:
-		return x
-	case string:
-		return []byte(x)
-	default:
-		panic(i)
-	}
-}
-
 // Common event types and attribute keys
-var (
+const (
 	EventTypeTx = "tx"
 
 	AttributeKeyAccountSequence = "acc_seq"
@@ -295,7 +295,7 @@ func StringifyEvent(e abci.Event) StringEvent {
 	for _, attr := range e.Attributes {
 		res.Attributes = append(
 			res.Attributes,
-			Attribute{string(attr.Key), string(attr.Value)},
+			Attribute{Key: string(attr.Key), Value: string(attr.Value)},
 		)
 	}
 
