@@ -3,7 +3,6 @@ package keyring
 import (
 	"context"
 	"crypto/elliptic"
-	"encoding/hex"
 	"fmt"
 	"math/big"
 
@@ -30,13 +29,6 @@ type PubKeyETH struct {
 
 type EthAddress struct {
 	bytes.HexBytes
-}
-
-func (addr EthAddress) hex() []byte {
-	buf := make([]byte, 0, len(addr.Bytes())*2+2)
-	copy(buf[:2], "0x")
-	hex.Encode(buf[2:], addr.Bytes()[:])
-	return buf[:]
 }
 
 // Address return ETH address style

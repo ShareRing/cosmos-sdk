@@ -379,7 +379,7 @@ func (k Keeper) DumpUpgradeInfoToDisk(height int64, p types.Plan) error {
 		Height: height,
 		Info:   p.Info,
 	}
-	bz, err := json.Marshal(upgradeInfo)
+	info, err := json.Marshal(upgradeInfo)
 	if err != nil {
 		return err
 	}

@@ -16,14 +16,6 @@ import (
 	"time"
 
 	"cosmossdk.io/math"
-	"github.com/rs/zerolog"
-	"github.com/spf13/cobra"
-	tmrand "github.com/tendermint/tendermint/libs/rand"
-	"github.com/tendermint/tendermint/node"
-	tmclient "github.com/tendermint/tendermint/rpc/client"
-	dbm "github.com/tendermint/tm-db"
-	"google.golang.org/grpc"
-
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/tx"
@@ -45,6 +37,13 @@ import (
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/cosmos/cosmos-sdk/x/genutil"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+	"github.com/rs/zerolog"
+	"github.com/spf13/cobra"
+	tmrand "github.com/tendermint/tendermint/libs/rand"
+	"github.com/tendermint/tendermint/node"
+	tmclient "github.com/tendermint/tendermint/rpc/client"
+	dbm "github.com/tendermint/tm-db"
+	"google.golang.org/grpc"
 )
 
 // package-wide network lock to only allow one test network at a time
