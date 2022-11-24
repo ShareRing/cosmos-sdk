@@ -7,9 +7,9 @@ import (
 	"math/big"
 
 	btcec2 "github.com/btcsuite/btcd/btcec/v2"
-	"github.com/cosmos/cosmos-sdk/codec/legacy"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	"github.com/cosmos/cosmos-sdk/crypto/types"
+	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
@@ -85,13 +85,17 @@ func (ks keystoreEth) getPriv(uid string) (types.PrivKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	var priv types.PrivKey
+
 	switch i := record.Item.(type) {
 	case *Record_Local_:
 		if i.Local.PrivKey == nil {
 			return nil, fmt.Errorf("private key not available")
 		}
-		priv, err = legacy.PrivKeyFromBytes(i.Local.PrivKey.Value)
+
+		priv, ok := record.GetLocal().PrivKey.GetCachedValue().(cryptotypes.PrivKey)
+		if !ok {
+			return nil, fmt.Errorf("get type assertion priv key fail")
+		}
 		return priv, err
 	default:
 		return nil, fmt.Errorf("currently supports for local key only")
