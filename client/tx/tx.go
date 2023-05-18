@@ -13,6 +13,7 @@ import (
 
 	authsigning "cosmossdk.io/x/auth/signing"
 
+	errorsmod "cosmossdk.io/errors"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/input"
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
@@ -22,7 +23,19 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/tx/signing"
 )
 
-// GenerateOrBroadcastTxCLI will either generate and print an unsigned transaction
+// PreRunBroadcastTx func type that will be exected before BroadcastTx
+// return new state of the clientCtx, txf and msgs.
+// if the func return error, the function will not process to BroadcastTx but return error
+type PreRunBroadcastTx func(clientCtx client.Context, txf Factory, msgs ...sdk.Msg) (nClientCtx client.Context, nTxf Factory, nMsgs []sdk.Msg, err error)
+
+// preRunBroadcastTxs the list of func prerun will be exected before BroadcastTx
+var preRunBroadcastTxs []PreRunBroadcastTx
+
+func AddPreRunBroadcastTx(f PreRunBroadcastTx) {
+	preRunBroadcastTxs = append(preRunBroadcastTxs, f)
+}
+
+// GenerateOrBroadcastTxCLI will either generate and print and unsigned transaction
 // or sign it and broadcast it returning an error upon failure.
 func GenerateOrBroadcastTxCLI(clientCtx client.Context, flagSet *pflag.FlagSet, msgs ...sdk.Msg) error {
 	txf, err := NewFactoryCLI(clientCtx, flagSet)
@@ -58,6 +71,14 @@ func GenerateOrBroadcastTxWithFactory(clientCtx client.Context, txf Factory, msg
 		}
 
 		return clientCtx.PrintProto(&auxSignerData)
+	}
+
+	var err error
+	for i, f := range preRunBroadcastTxs {
+		clientCtx, txf, msgs, err = f(clientCtx, txf, msgs...)
+		if err != nil {
+			return errorsmod.Wrapf(err, "pre run function at %v", i)
+		}
 	}
 
 	if clientCtx.GenerateOnly {
