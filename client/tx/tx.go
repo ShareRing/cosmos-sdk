@@ -8,9 +8,7 @@ import (
 	"fmt"
 	"os"
 
-	gogogrpc "github.com/cosmos/gogoproto/grpc"
-	"github.com/spf13/pflag"
-
+	errorsmod "cosmossdk.io/errors"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/input"
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
@@ -19,9 +17,23 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/tx"
 	"github.com/cosmos/cosmos-sdk/types/tx/signing"
 	authsigning "github.com/cosmos/cosmos-sdk/x/auth/signing"
+	gogogrpc "github.com/cosmos/gogoproto/grpc"
+	"github.com/spf13/pflag"
 )
 
-// GenerateOrBroadcastTxCLI will either generate and print an unsigned transaction
+// PreRunBroadcastTx func type that will be exected before BroadcastTx
+// return new state of the clientCtx, txf and msgs.
+// if the func return error, the function will not process to BroadcastTx but return error
+type PreRunBroadcastTx func(clientCtx client.Context, txf Factory, msgs ...sdk.Msg) (nClientCtx client.Context, nTxf Factory, nMsgs []sdk.Msg, err error)
+
+// preRunBroadcastTxs the list of func prerun will be exected before BroadcastTx
+var preRunBroadcastTxs []PreRunBroadcastTx
+
+func AddPreRunBroadcastTx(f PreRunBroadcastTx) {
+	preRunBroadcastTxs = append(preRunBroadcastTxs, f)
+}
+
+// GenerateOrBroadcastTxCLI will either generate and print and unsigned transaction
 // or sign it and broadcast it returning an error upon failure.
 func GenerateOrBroadcastTxCLI(clientCtx client.Context, flagSet *pflag.FlagSet, msgs ...sdk.Msg) error {
 	txf, err := NewFactoryCLI(clientCtx, flagSet)
@@ -58,6 +70,14 @@ func GenerateOrBroadcastTxWithFactory(clientCtx client.Context, txf Factory, msg
 		}
 
 		return clientCtx.PrintProto(&auxSignerData)
+	}
+
+	var err error
+	for i, f := range preRunBroadcastTxs {
+		clientCtx, txf, msgs, err = f(clientCtx, txf, msgs...)
+		if err != nil {
+			return errorsmod.Wrapf(err, "pre run function at %v", i)
+		}
 	}
 
 	if clientCtx.GenerateOnly {
@@ -100,14 +120,9 @@ func BroadcastTx(clientCtx client.Context, txf Factory, msgs ...sdk.Msg) error {
 	}
 
 	if !clientCtx.SkipConfirm {
-		encoder := txf.txConfig.TxJSONEncoder()
-		if encoder == nil {
-			return errors.New("failed to encode transaction: tx json encoder is nil")
-		}
-
-		txBytes, err := encoder(tx.GetTx())
+		txBytes, err := clientCtx.TxConfig.TxJSONEncoder()(tx.GetTx())
 		if err != nil {
-			return fmt.Errorf("failed to encode transaction: %w", err)
+			return err
 		}
 
 		if err := clientCtx.PrintRaw(json.RawMessage(txBytes)); err != nil {
@@ -126,7 +141,8 @@ func BroadcastTx(clientCtx client.Context, txf Factory, msgs ...sdk.Msg) error {
 		}
 	}
 
-	if err = Sign(clientCtx.CmdContext, txf, clientCtx.FromName, tx, true); err != nil {
+	err = Sign(clientCtx.CmdContext, txf, clientCtx.GetFromName(), tx, true)
+	if err != nil {
 		return err
 	}
 
@@ -322,7 +338,9 @@ func Sign(ctx context.Context, txf Factory, name string, txBuilder client.TxBuil
 		return err
 	}
 
-	bytesToSign, err := authsigning.GetSignBytesAdapter(ctx, txf.txConfig.SignModeHandler(), signMode, signerData, txBuilder.GetTx())
+	bytesToSign, err := authsigning.GetSignBytesAdapter(
+		ctx, txf.txConfig.SignModeHandler(),
+		signMode, signerData, txBuilder.GetTx())
 	if err != nil {
 		return err
 	}
@@ -393,6 +411,13 @@ func makeAuxSignerData(clientCtx client.Context, f Factory, msgs ...sdk.Msg) (tx
 	err = b.SetMsgs(msgs...)
 	if err != nil {
 		return tx.AuxSignerData{}, err
+	}
+
+	if f.tip != nil {
+		if _, err := sdk.AccAddressFromBech32(f.tip.Tipper); err != nil {
+			return tx.AuxSignerData{}, sdkerrors.ErrInvalidAddress.Wrap("tipper must be a bech32 address")
+		}
+		b.SetTip(f.tip)
 	}
 
 	err = b.SetSignMode(f.SignMode())
