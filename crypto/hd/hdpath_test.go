@@ -8,7 +8,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/crypto/hd"
 	"github.com/cosmos/cosmos-sdk/types"
 
-	bip39 "github.com/cosmos/go-bip39"
+	"github.com/cosmos/go-bip39"
 	"github.com/stretchr/testify/require"
 )
 
@@ -89,6 +89,7 @@ func TestParamsFromPath(t *testing.T) {
 		require.Nil(t, params, errStr)
 		require.Error(t, err, errStr)
 	}
+
 }
 
 func TestCreateHDPath(t *testing.T) {
