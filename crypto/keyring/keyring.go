@@ -768,7 +768,7 @@ func (ks keystore) writeLocalKey(name string, privKey types.PrivKey) (*Record, e
 func (ks keystore) writeRecord(k *Record) error {
 	addr := k.GetAddress()
 
-	key := k.Name
+	key := infoKey(k.Name)
 
 	exists, err := ks.existsInDb(addr, key)
 	if err != nil {
@@ -990,3 +990,5 @@ func (ks unsafeKeystore) UnsafeExportPrivKeyHex(uid string) (privkey string, err
 func addrHexKeyAsString(address sdk.Address) string {
 	return fmt.Sprintf("%s.%s", hex.EncodeToString(address.Bytes()), addressSuffix)
 }
+
+func infoKey(name string) string { return fmt.Sprintf("%s.%s", name, "info") }
